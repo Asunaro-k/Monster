@@ -1,7 +1,7 @@
 # app.py
 import streamlit as st
 import torch
-from diffusers import DiffusionPipeline
+from diffusers import StableDiffusionPipeline
 from PIL import Image
 import io
 import random
@@ -40,9 +40,9 @@ class Monster:
 @st.cache_resource
 def load_pipeline():
     # pokemon-blipモデルをロード
-    pipeline = DiffusionPipeline.from_pretrained(
-        "lambdalabs/pokemon-blip",
-        torch_dtype=torch.float32
+    pipeline = StableDiffusionPipeline.from_pretrained(
+        "stabilityai/stable-diffusion-2",
+        torch_dtype=torch.float16
     )
     if torch.cuda.is_available():
         pipeline = pipeline.to("cuda")
@@ -63,13 +63,14 @@ def generate_monster_image(pipeline, prompt):
 
 def main():
     st.title("モンスター育成ゲーム")
-    
     # モデルのロード
     pipeline = load_pipeline()
     
     # セッション状態の初期化
     if 'monster' not in st.session_state:
         st.session_state.monster = None
+        st.session_state.element = None
+        st.session_state.monster_type = None
     
     # モンスター作成フォーム
     if st.session_state.monster is None:
@@ -90,6 +91,8 @@ def main():
             
             if submit and monster_name:
                 st.session_state.monster = Monster(monster_name)
+                st.session_state.element = element
+                st.session_state.monster_type = monster_type
                 with st.spinner("モンスターを生成中..."):
                     # プロンプトの作成
                     prompt = f"a cute {element} type {monster_type} pokemon, simple design, white background"
@@ -121,17 +124,22 @@ def main():
                 if st.session_state.monster.exp == 0:  # レベルアップした場合
                     st.balloons()
                     with st.spinner("モンスターが進化中..."):
+                        # セッション状態から属性とタイプを取得
+                        element = st.session_state.element
+                        monster_type = st.session_state.monster_type
                         # 進化時はより強そうなプロンプトを使用
                         prompt = f"a powerful evolved {element} type {monster_type} pokemon, detailed features, white background"
                         new_image = generate_monster_image(pipeline, prompt)
                         if new_image:
                             st.session_state.monster.image = new_image
-                st.experimental_rerun()
+                st.rerun()
         
         with col4:
             if st.button("リセット"):
                 st.session_state.monster = None
-                st.experimental_rerun()
+                st.session_state.element = None
+                st.session_state.monster_type = None
+                st.rerun()
 
 if __name__ == "__main__":
     main()
