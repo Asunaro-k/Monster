@@ -1,0 +1,11 @@
+english streamlit app
+
+## docker compose 起動方法
+`models`をダウンロードし、入れておく
+checkpointモデルでAnycheckpointを使用して、Loraはpokemonのもの
+
+起動する。
+
+```bash
+docker compose up -d
+```
