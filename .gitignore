@@ -2,3 +2,5 @@ app/models/*
 gemma2-9b
 mysql_data
 .env
+過去ページ
+test.ipynb

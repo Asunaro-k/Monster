@@ -501,12 +501,13 @@ def search_images(query, num_results=5):
         return []
 
 def setting_confi():
-    tmp = st.session_state.generate_toggle
-    toggle = st.toggle("画像生成を有効にする")
-    if tmp != toggle:
-        st.session_state.generate_toggle = toggle
-    st.write(st.session_state.generate_toggle)
-    st.rerun()
+    # tmp = st.session_state.generate_toggle
+    # toggle = st.toggle("画像生成を有効にする")
+    # if tmp != toggle:
+    #     st.session_state.generate_toggle = toggle
+    # st.write(st.session_state.generate_toggle)
+    # st.rerun()
+    st.write("test")
         
 # User authentication functions
 def hash_password(password):

@@ -1,145 +1,261 @@
-# app.py
 import streamlit as st
-import torch
-from diffusers import StableDiffusionPipeline
-from PIL import Image
-import io
-import random
-import time
+import mysql.connector
+from mysql.connector import Error
+import os
+import hashlib
+# Database configuration
+DB_CONFIG = {
+    'host': os.environ["DB_HOST"],
+    'user': os.environ["DB_USER"],
+    'password': os.environ["DB_PASSWORD"],
+    'database': os.environ["DB_NAME"]
+}
 
-class Monster:
-    def __init__(self, name):
-        self.name = name
-        self.level = 1
-        self.exp = 0
-        self.hp = 100
-        self.strength = 10
-        self.image = None
-
-    def feed(self):
-        self.exp += 20
-        if self.exp >= 100:
-            self.level_up()
-    
-    def level_up(self):
-        self.level += 1
-        self.exp = 0
-        self.hp += 20
-        self.strength += 5
-        return True
-    
-    def to_dict(self):
-        return {
-            "name": self.name,
-            "level": self.level,
-            "exp": self.exp,
-            "hp": self.hp,
-            "strength": self.strength
-        }
-
-@st.cache_resource
-def load_pipeline():
-    # pokemon-blipモデルをロード
-    pipeline = StableDiffusionPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2",
-        torch_dtype=torch.float16
-    )
-    if torch.cuda.is_available():
-        pipeline = pipeline.to("cuda")
-    return pipeline
-
-def generate_monster_image(pipeline, prompt):
+def init_db():
     try:
-        # プロンプトに基づいて画像を生成
-        image = pipeline(
-            prompt,
-            num_inference_steps=20,
-            guidance_scale=7.5
-        ).images[0]
-        return image
-    except Exception as e:
-        st.error(f"画像生成エラー: {str(e)}")
-        return None
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        # Create users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create progress table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_progress (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                score INT DEFAULT 0,
+                total_correct INT DEFAULT 0,
+                total_attempts INT DEFAULT 0,
+                last_session TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        # Create history table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS learning_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                japanese_text TEXT,
+                english_text TEXT,
+                is_correct BOOLEAN,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        conn.commit()
+    except Error as e:
+        st.error(f"Database error: {e}")
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+# User authentication functions
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
+def create_user(username, password):
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        
+        password_hash = hash_password(password)
+        cursor.execute(
+            "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
+            (username, password_hash)
+        )
+        
+        user_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO user_progress (user_id) VALUES (%s)",
+            (user_id,)
+        )
+        
+        conn.commit()
+        return True
+    except Error as e:
+        st.error(f"Error creating user: {e}")
+        return False
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def verify_user(username, password):
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        
+        password_hash = hash_password(password)
+        cursor.execute(
+            "SELECT * FROM users WHERE username = %s AND password_hash = %s",
+            (username, password_hash)
+        )
+        
+        user = cursor.fetchone()
+        return user
+    except Error as e:
+        st.error(f"Error verifying user: {e}")
+        return None
+    finally:
+        if conn.is_connected():
+            cursor.close()
+            conn.close()
+
+# Login/Signup UI
+def show_auth_ui():
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+    
+    with tab1:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Login")
+            
+            if submit:
+                user = verify_user(username, password)
+                if user:
+                    st.session_state.user = user
+                    st.session_state.authenticated = True
+                    st.success("Successfully logged in!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+    
+    with tab2:
+        with st.form("signup_form"):
+            new_username = st.text_input("Choose Username")
+            new_password = st.text_input("Choose Password", type="password")
+            confirm_password = st.text_input("Confirm Password", type="password")
+            submit = st.form_submit_button("Sign Up")
+            
+            if submit:
+                if new_password != confirm_password:
+                    st.error("Passwords do not match")
+                elif len(new_password) < 6:
+                    st.error("Password must be at least 6 characters long")
+                else:
+                    if create_user(new_username, new_password):
+                        st.success("Account created successfully! Please log in.")
+                    else:
+                        st.error("Username already exists")
+
+def create_sidebar():
+    with st.sidebar:
+        if st.session_state.get("authenticated"):
+            st.title("メニュー / Menu")
+            modes = [
+                {"label": "学習モード / Study Mode", "key": "study"},
+                {"label": "チャットモード / Chat Mode", "key": "chat"},
+                {"label": "英会話モード / Speaking Talking Mode", "key": "stt"},
+                {"label": "育成モード / Nurturing Mode", "key": "Monster"}
+            ]
+
+            for mode in modes:
+                if st.button(
+                    mode["label"],
+                    type="primary" if st.session_state.get("mode", "study") == mode["key"] else "secondary"
+                ):
+                    st.session_state.mode = mode["key"]
+                    st.rerun()
+            # Mode selection
+            # st.write("### モード選択 / Mode Selection")
+            # if st.button("学習モード / Study Mode", 
+            #             type="primary" if st.session_state.get("mode", "study") == "study" else "secondary"):
+            #     st.session_state.mode = "study"
+            #     st.rerun()
+            
+            # if st.button("チャットモード / Chat Mode",
+            #             type="primary" if st.session_state.get("mode", "study") == "chat" else "secondary"):
+            #     st.session_state.mode = "chat"
+            #     st.rerun()
+
+            # if st.button("英会話モード / Speaking Talking Mode",
+            #             type="primary" if st.session_state.get("mode", "study") == "stt" else "secondary"):
+            #     st.session_state.mode = "stt"
+            #     st.rerun()
+
+            # if st.button("育成モード / Nurturing Mode",
+            #             type="primary" if st.session_state.get("mode", "study") == "Monster" else "secondary"):
+            #     st.session_state.mode = "Monster"
+            #     st.rerun()
+                
+
+def create_logoutsidebar():
+    with st.sidebar:
+        # Show user info if logged in
+        if st.session_state.get("authenticated"):
+            st.write("---")
+            st.write(f"### ユーザー / User")
+            st.write(f"🧑‍💻 {st.session_state.user['username']}")
+            
+            if st.button("ログアウト / Logout"):
+                st.session_state.clear()
+                st.rerun()
+
+                
 def main():
-    st.title("モンスター育成ゲーム")
-    # モデルのロード
-    pipeline = load_pipeline()
+    st.session_state.image_flag = None
+    # Initialize database
+    init_db()
     
-    # セッション状態の初期化
-    if 'monster' not in st.session_state:
-        st.session_state.monster = None
-        st.session_state.element = None
-        st.session_state.monster_type = None
+    # Set default mode if not set
+    if 'mode' not in st.session_state:
+        st.session_state.mode = "study"
+    if 'Flag_serachimag' not in st.session_state:
+        st.session_state.Flag_serachimag = False
+    if 'image_results' not in st.session_state:
+        st.session_state.image_results = []
+    if 'learnimage' not in st.session_state:
+            st.session_state.learnimage = None
+    if 'generate_toggle' not in st.session_state:
+        st.session_state.generate_toggle = False
+    # if 'last_mode' not in st.session_state:
+    #     st.session_state.last_mode = None
+
+    # Check if mode has changed
+    # if st.session_state.mode != st.session_state.last_mode:
+    #     reset_mode_specific_state(st.session_state.mode)
+    #     st.session_state.last_mode = st.session_state.mode
     
-    # モンスター作成フォーム
-    if st.session_state.monster is None:
-        with st.form("create_monster"):
-            monster_name = st.text_input("モンスターの名前を入力してください")
-            monster_type = st.selectbox(
-                "モンスターのタイプを選択",
-                ["dragon", "slime", "fairy", "rock monster"]
-            )
-            
-            # 属性の追加
-            element = st.selectbox(
-                "モンスターの属性を選択",
-                ["fire", "water", "grass", "electric"]
-            )
-            
-            submit = st.form_submit_button("モンスターを作成")
-            
-            if submit and monster_name:
-                st.session_state.monster = Monster(monster_name)
-                st.session_state.element = element
-                st.session_state.monster_type = monster_type
-                with st.spinner("モンスターを生成中..."):
-                    # プロンプトの作成
-                    prompt = f"a cute {element} type {monster_type} pokemon, simple design, white background"
-                    image = generate_monster_image(pipeline, prompt)
-                    if image:
-                        st.session_state.monster.image = image
+    # Create sidebar
+    create_sidebar()
     
-    # モンスター情報の表示と操作
-    if st.session_state.monster:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.session_state.monster.image:
-                st.image(st.session_state.monster.image, caption=st.session_state.monster.name)
-        
-        with col2:
-            st.write(f"名前: {st.session_state.monster.name}")
-            st.progress(st.session_state.monster.exp / 100)
-            st.write(f"レベル: {st.session_state.monster.level}")
-            st.write(f"経験値: {st.session_state.monster.exp}/100")
-            st.write(f"HP: {st.session_state.monster.hp}")
-            st.write(f"力: {st.session_state.monster.strength}")
-        
-        # アクションボタン
-        col3, col4 = st.columns(2)
-        with col3:
-            if st.button("餌をあげる"):
-                st.session_state.monster.feed()
-                if st.session_state.monster.exp == 0:  # レベルアップした場合
-                    st.balloons()
-                    with st.spinner("モンスターが進化中..."):
-                        # セッション状態から属性とタイプを取得
-                        element = st.session_state.element
-                        monster_type = st.session_state.monster_type
-                        # 進化時はより強そうなプロンプトを使用
-                        prompt = f"a powerful evolved {element} type {monster_type} pokemon, detailed features, white background"
-                        new_image = generate_monster_image(pipeline, prompt)
-                        if new_image:
-                            st.session_state.monster.image = new_image
-                st.rerun()
-        
-        with col4:
-            if st.button("リセット"):
-                st.session_state.monster = None
-                st.session_state.element = None
-                st.session_state.monster_type = None
-                st.rerun()
+    # Check authentication
+    if 'authenticated' not in st.session_state or not st.session_state.authenticated:
+        show_auth_ui()
+    else:
+        # Display appropriate UI based on mode
+        if st.session_state.mode == "study":   
+            from contents import study_mode
+            study_mode.render()
+            #create_app_ui()
+            
+        elif st.session_state.mode == "chat":
+            from contents import chat_mode
+            chat_mode.render()
+            #create_chat_ui()
+
+        elif st.session_state.mode == "stt":
+            from contents import stt_mode
+            stt_mode.render()
+            #STT()
+
+        elif st.session_state.mode == "Monster":
+            from contents import Monster_mode
+            Monster_mode.render()
+    
+    create_logoutsidebar()
+
 
 if __name__ == "__main__":
     main()
