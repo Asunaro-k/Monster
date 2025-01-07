@@ -277,7 +277,7 @@ def render():
         st.write("話しかけてみよう！")
     else:
         if not st.session_state.flag:
-            question_prompts = asyncio.run(level_chain.ainvoke(st.session_state.user_level))
+            question_prompts = level_chain.invoke(st.session_state.user_level)
             st.session_state.content = question_prompts.content if hasattr(question_prompts, 'content') else str(question_prompts)
         if st.session_state.content:
             st.write(st.session_state.content)
@@ -290,7 +290,7 @@ def render():
         neutral_color="#6aa36f",
         icon_name="microphone",
         icon_size="3x",
-        pause_threshold=4
+        pause_threshold=3
     )
     # st.markdown(st.session_state.reset_audio_input)
 
@@ -325,7 +325,7 @@ def render():
                 st.write(generated_text)
 
                 # 言語判定と音声生成
-                tts_result = asyncio.run(tts_chain.ainvoke(generated_text))
+                tts_result = tts_chain.invoke(generated_text)
                 tts_content = tts_result.content if hasattr(tts_result, 'content') else str(tts_result)
                 language_flag = "language_jp: true" in tts_content
                 language = "ja" if language_flag else "en"

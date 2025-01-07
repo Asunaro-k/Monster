@@ -11,6 +11,66 @@ DB_CONFIG = {
     'database': os.environ["DB_NAME"]
 }
 
+st.set_page_config(
+    page_title="English Learning App",
+    page_icon="📚",
+    layout="centered"
+)
+
+HIDE_ST_STYLE = """
+    <style>
+    div[data-testid="stToolbar"] {
+        visibility: hidden;
+        height: 0%;
+        position: fixed;
+    }
+    div[data-testid="stDecoration"] {
+        visibility: hidden;
+        height: 0%;
+        position: fixed;
+    }
+    #MainMenu {
+        visibility: hidden;
+        height: 0%;
+    }
+    header {
+        visibility: hidden;
+        height: 0%;
+    }
+    footer {
+        visibility: hidden;
+        height: 0%;
+    }
+    div[data-testid=stSidebar] {
+        background-color: #3fa0bf;  /* 淡い青色 */
+        color: #000000;  /* 文字色を黒に設定（必要に応じて変更） */
+    }
+    .appview-container .main .block-container {
+        padding-top: 1rem;
+        padding-right: 3rem;
+        padding-left: 3rem;
+        padding-bottom: 1rem;
+    }
+    .reportview-container {
+        padding-top: 0rem;
+        padding-right: 3rem;
+        padding-left: 3rem;
+        padding-bottom: 0rem;
+    }
+    header[data-testid="stHeader"] {
+        z-index: -1;
+    }
+    div[data-testid="stToolbar"] {
+        z-index: 100;
+    }
+    div[data-testid="stDecoration"] {
+        z-index: 100;
+    }
+    </style>
+"""
+
+st.markdown(HIDE_ST_STYLE, unsafe_allow_html=True)
+
 def init_db():
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
@@ -48,6 +108,19 @@ def init_db():
                 english_text TEXT,
                 is_correct BOOLEAN,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_settings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT,
+                difficulty VARCHAR(10) DEFAULT 'normal',
+                themes JSON,
+                use_dummy_words BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
@@ -153,11 +226,16 @@ def create_sidebar():
     with st.sidebar:
         if st.session_state.get("authenticated"):
             st.title("メニュー / Menu")
+            # modes = [
+            #     {"label": "学習モード / Study Mode", "key": "study"},
+            #     {"label": "チャットモード / Chat Mode", "key": "chat"},
+            #     {"label": "英会話モード / Speaking Talking Mode", "key": "stt"},
+            #     {"label": "育成モード / Nurturing Mode", "key": "Monster"}
+            # ]
             modes = [
                 {"label": "学習モード / Study Mode", "key": "study"},
                 {"label": "チャットモード / Chat Mode", "key": "chat"},
-                {"label": "英会話モード / Speaking Talking Mode", "key": "stt"},
-                {"label": "育成モード / Nurturing Mode", "key": "Monster"}
+                {"label": "英会話モード / Speaking Talking Mode", "key": "stt"}
             ]
 
             for mode in modes:
@@ -250,12 +328,13 @@ def main():
             stt_mode.render()
             #STT()
 
-        elif st.session_state.mode == "Monster":
-            from contents import Monster_mode
-            Monster_mode.render()
+        # elif st.session_state.mode == "Monster":
+        #     from contents import Monster_mode
+        #     Monster_mode.render()
     
     create_logoutsidebar()
 
 
 if __name__ == "__main__":
     main()
+

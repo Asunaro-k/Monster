@@ -26,15 +26,16 @@ from duckduckgo_search import DDGS
 from requests.exceptions import HTTPError
 from langchain_ollama import ChatOllama
 from contents import LLM
+import asyncio
 
 
 async def handle_query(prompt, query_chain,question_chain, search, extract_urls, get_webpage_content, chat_history, image_file=None, imageflag=None):
     try:
         chain = ConversationChain(
-                    llm=st.session_state.llm,
-                    memory=st.session_state.memory,
-                    verbose=True
-                )
+            llm=st.session_state.llm,
+            memory=st.session_state.memory,
+            verbose=True
+        )
         # 画像がアップロードされている場合
         if image_file is not None:
             #comment_prompt = f"この画像に関する質問/コメント：{prompt}" if prompt is not None else ""
@@ -45,28 +46,46 @@ async def handle_query(prompt, query_chain,question_chain, search, extract_urls,
                     caption = generate_image_caption(image_file)
                 st.info(f"画像の説明: {caption}")
                 
-                prompt_with_image = f"""キーワードに基づいた簡単な英会話をあなたとしたいです。
-                以下に例を張ります。例なので猫などの内容は無視してください。\n
-                A: Look at the cat! It's sitting on the floor in front of the kitchen. (見て！猫がキッチンの前の床に座ってるよ。)\n
-                B: Yeah, it looks so relaxed! (ああ、まったりしてるね！)\n
-                A: I know, right? Maybe it's waiting for food. (そうだよね？もしかしたらご飯が食べたいから待ってるのかな。)\n
-                B: Do you think the cat is hungry? (猫はおなかすいてるかな？)\n
-                A: Hmm, maybe. Cats love food! (えー、もしかしたら。猫は食べ物が大好きなんだよ！)\n\n
-                Question: What do you think the cat would say if it could talk? (猫が話すことができたら何と言うかな？)\n
+                # prompt_with_image = f"""キーワードに基づいた簡単な英会話をあなたとしたいです。
+                # 以下に例を張ります。例なので猫などの内容は無視してください。\n
+                # A: Look at the cat! It's sitting on the floor in front of the kitchen. (見て！猫がキッチンの前の床に座ってるよ。)\n
+                # B: Yeah, it looks so relaxed! (ああ、まったりしてるね！)\n
+                # A: I know, right? Maybe it's waiting for food. (そうだよね？もしかしたらご飯が食べたいから待ってるのかな。)\n
+                # B: Do you think the cat is hungry? (猫はおなかすいてるかな？)\n
+                # A: Hmm, maybe. Cats love food! (えー、もしかしたら。猫は食べ物が大好きなんだよ！)\n\n
+                # Question: What do you think the cat would say if it could talk? (猫が話すことができたら何と言うかな？)\n
                 
-                上記のようにキーワードに基づいて何回か日本語訳をつけた英会話をしたうえで、最後に日本語訳をつけた英語で私に何か質問か問いかけをしてください。キーワード：
-                {caption}
+                # 上記のようにキーワードに基づいて何回か日本語訳をつけた英会話をしたうえで、最後に日本語訳をつけた英語で私に何か質問か問いかけをしてください。キーワード：
+                # {caption}
 
+                # """
+                prompt_with_image = f"""
+                以下のキーワードを使った日本語訳付きの簡単な英会話を作成してください。  
+                1. **キーワードに関連した1つの短い英語の文**（日本語訳を添えること）。  
+                2. **その文に基づいた、英語の質問を1つ**（日本語訳を添えること）。  
+
+                例（キーワード: 猫）:  
+                英語: Look at the cat! It's sitting on the floor in front of the kitchen. \n 
+                日本語訳: 見て！猫がキッチンの前の床に座ってるよ。  \n
+
+                質問: What do you think the cat would say if it could talk?  \n
+                日本語訳: 猫が話すことができたら何と言うかな？  \n
+
+                以下の形式に従って作成してください。  
+
+                キーワード: {caption}  
                 """
                 
                 #response = await st.session_state.llm.apredict(prompt_with_image)
-                reply = await chain.ainvoke(prompt_with_image)
+                reply = chain.invoke(prompt_with_image)
+                #reply = await chain.ainvoke(prompt_with_image)
                 response = reply['response']
                 await chat_history.add_message(prompt_with_image, is_bot=False)
                 await chat_history.add_message(response, is_bot=True)
                 st.session_state['questionprompt'] = response
                 st.session_state['previous_uploaded_file'] = image_file
-                analysis = await question_chain.ainvoke(st.session_state.get('questionprompt', ''))
+                # analysis = await question_chain.ainvoke(st.session_state.get('questionprompt', ''))
+                analysis = question_chain.invoke(st.session_state.get('questionprompt', ''))
                 content = analysis.content if hasattr(analysis, 'content') else str(analysis)
                 st.session_state['needs_question'] = "NEEDS_QUESTION: true" in content
                 if st.session_state['needs_question']:
@@ -76,30 +95,58 @@ async def handle_query(prompt, query_chain,question_chain, search, extract_urls,
                 
             else:
                 st.markdown("Question")
-                st.markdown(f"{st.session_state['question_query']}")
+                if st.session_state['question_query']:
+                    st.markdown(f"{st.session_state['question_query']}")
                 # 同じ画像の場合は英会話の正誤判定サポート
+                # prompt_with_support = f"""
+                
+                # あなたの目標は、ユーザーが楽しく英会話を練習し、上達できるようにサポートすることです。
+                # 次の文章の英語の正しさを日本語で評価し、あっている場合は褒めてください。
+                # 英語ではない場合や間違っている場合は修正を提案し、修正した英語を話してください。
+                # またその後も会話を続けます。\n
+                # 以下に例を張ります。例なので岩の崖などの内容は無視してください。\n
+                # Question: What do you think is the most beautiful rocky cliff with a body of water in the world?\n
+                # 上記のように日本語訳をつけた英語で私に何か質問か問いかけをしてください。
+                # 前回の出力で次のような会話を行いました。：{st.session_state.get('questionprompt', '')}\n
+                # 質問の回答: {prompt}"""
                 prompt_with_support = f"""
-                
                 あなたの目標は、ユーザーが楽しく英会話を練習し、上達できるようにサポートすることです。
-                次の文章の英語の正しさを日本語で評価し、あっている場合は褒めてください。
-                英語ではない場合や間違っている場合は修正を提案し、修正した英語を話してください。
-                またその後も会話を続けます。\n
-                以下に例を張ります。例なので岩の崖などの内容は無視してください。\n
-                Question: What do you think is the most beautiful rocky cliff with a body of water in the world?\n
-                上記のように日本語訳をつけた英語で私に何か質問か問いかけをしてください。
-                前回の出力で次のような会話を行いました。：{st.session_state.get('questionprompt', '')}\n
-                質問の回答: {prompt}"""
+                会話の文脈を読み取り、次の質問の回答の文章の英語の正しさを日本語で評価し、あっている場合は、どの部分が良いか具体的に褒めてください。
+                英語ではない場合や文脈的に間違っている場合や短すぎて文章として足りない場合は、どの点が問題かを簡潔に説明し、修正案を日本語で提案した後、修正した英語を提示してください。
+                "評価は必ず日本語でわかりやすく記述してください。"
+                また、その後も会話を続けます。下記のように日本語訳をつけた英語で私に何か質問か問いかけをしてください。
+
+                以下に例を張ります。例なので羊などの内容は無視してください。:
                 
+                あなたの回答 "sheep's dreams is flying sky" については、いくつか問題があります。
+
+                **問題点:**
+
+                * **文法的エラー:** "sheep's dreams is" は文法的に正しくありません。主語が複数形なので、動詞も複数形にしなければなりません。つまり、"sheep's dreams are" になります。
+                * **単語の選択:** "flying sky" という表現は、意味としては理解できますが、自然な英語ではありません。夢の中で飛んでいることを表現したい場合は、"flying in the sky" または "soaring through the air" などの表現がより適しています。
+
+                **修正案:**
+
+                Sheep's dreams are flying in the sky.
+
+                これを英訳すると： 羊の夢の中では空中を飛んでいるようです。
+
+                さて、私から次の質問です：What is the most memorable dream you had while you were sleeping?（あなたは眠っている間に経験した一番印象に残る夢については何ですか？）
+
                 
+                前回の出力で次のような会話を行いました：{st.session_state.get('questionprompt', '')}
+                質問の回答: {prompt}
+                """
                 
                 #response = await st.session_state.llm.apredict(prompt_with_support)
-                reply = await chain.ainvoke(prompt_with_support)
+                reply = chain.invoke(prompt_with_support)
+                #reply = asyncio.run(chain.ainvoke(prompt_with_support))
                 response = reply['response']
-                #response = await chain.ainvoke(prompt_with_support)
                 st.session_state['questionprompt'] = response
                 await chat_history.add_message(prompt_with_support, is_bot=False)
                 await chat_history.add_message(response, is_bot=True)
-                analysis = await question_chain.ainvoke(response)
+                analysis = question_chain.invoke(response)
+                #analysis = await question_chain.ainvoke(response)
                 content = analysis.content if hasattr(analysis, 'content') else str(analysis)
                 st.session_state['needs_question'] = "NEEDS_QUESTION: true" in content
                 if st.session_state['needs_question']:
@@ -109,7 +156,8 @@ async def handle_query(prompt, query_chain,question_chain, search, extract_urls,
         else:
             # 通常のテキストベースの処理
             #recent_history = await chat_history.get_recent_history()
-            analysis = await query_chain.ainvoke(prompt)
+            # analysis = await query_chain.ainvoke(prompt)
+            analysis = query_chain.invoke(prompt)
             content = analysis.content if hasattr(analysis, 'content') else str(analysis)
             needs_search = "NEEDS_SEARCH: true" in content
             has_url = "HAS_URL: true" in content
@@ -121,7 +169,8 @@ async def handle_query(prompt, query_chain,question_chain, search, extract_urls,
                     prompt_with_content = f"以下のWebページの内容に基づいて適切な返答を考えてください。広告や関連記事などに気を取られないでください。\n\nWebページ内容: {webpage_content}\n\n質問: {prompt}"
                     #response = await st.session_state.llm.apredict(prompt_with_content)
                     #response = await chain.ainvoke(prompt_with_content)
-                    reply = await chain.ainvoke(prompt_with_content)
+                    # reply = await chain.ainvoke(prompt_with_content)
+                    reply = chain.invoke(prompt_with_content)
                     response = reply['response']
             elif needs_search:
                 st.markdown("""DuckDuckGoで検索中...""")
@@ -137,13 +186,15 @@ async def handle_query(prompt, query_chain,question_chain, search, extract_urls,
                     """
                     
                     #response = await st.session_state.llm.apredict(prompt_with_search)
-                    reply = await chain.ainvoke(prompt_with_search)
+                    reply = chain.invoke(prompt_with_search)
+                    #reply = await chain.ainvoke(prompt_with_search)
                     response = reply['response']
                 else:
                     response = "申し訳ありません。検索クエリの生成に失敗しました。"
             else:
                 #st.markdown(st.session_state.memory)
-                reply = await chain.ainvoke(prompt)
+                #reply = await chain.ainvoke(prompt)
+                reply = chain.invoke(prompt)
                 response = reply['response']
 
         # 応答の表示
@@ -188,7 +239,7 @@ def init_session_state():
         st.session_state.image_captioner = load_caption_model()
     if 'messages' not in st.session_state:
         st.session_state.messages = []
-    if 'memory' not in st.session_state:
+    if 'memory' not in st.session_state or st.session_state.memory is None:
         st.session_state.memory = ConversationBufferMemory()
     if 'llm' not in st.session_state:
         st.session_state.llm = LLM.init_ollama()
